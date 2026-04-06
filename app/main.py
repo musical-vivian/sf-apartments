@@ -95,6 +95,15 @@ def get_listings(
     }
 
 
+@app.get("/api/health")
+def health(db: Session = Depends(get_db)):
+    try:
+        count = db.query(Listing).count()
+        return {"status": "ok", "db": "connected", "listings": count}
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
 @app.get("/api/stats")
 def get_stats(db: Session = Depends(get_db)):
     total = db.query(Listing).filter(Listing.is_active == True).count()
