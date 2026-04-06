@@ -20,19 +20,23 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
+ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "false").lower() == "true"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _scheduler
     init_db()
-    _scheduler = start_scheduler()
-    # Run an initial scrape on startup if DB is empty
-    from .database import SessionLocal
-    db = SessionLocal()
-    count = db.query(Listing).count()
-    db.close()
-    if count == 0:
-        import threading
-        threading.Thread(target=run_scrapers, daemon=True).start()
+    if ENABLE_SCHEDULER:
+        _scheduler = start_scheduler()
+        # Run an initial scrape on startup if DB is empty
+        from .database import SessionLocal
+        db = SessionLocal()
+        count = db.query(Listing).count()
+        db.close()
+        if count == 0:
+            import threading
+            threading.Thread(target=run_scrapers, daemon=True).start()
     yield
     if _scheduler:
         _scheduler.shutdown()
@@ -51,6 +55,7 @@ def get_listings(
     bedrooms: Optional[str] = Query(None),
     max_price: Optional[int] = Query(None),
     min_sqft: Optional[int] = Query(None),
+    neighborhood: Optional[str] = Query(None),
     sort: str = Query("newest"),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -70,6 +75,8 @@ def get_listings(
         q = q.filter(Listing.price <= max_price)
     if min_sqft:
         q = q.filter(Listing.sqft >= min_sqft)
+    if neighborhood:
+        q = q.filter(Listing.neighborhood == neighborhood)
 
     if sort == "price_asc":
         q = q.order_by(Listing.price.asc().nullslast())
@@ -100,8 +107,22 @@ def get_stats(db: Session = Depends(get_db)):
     return {"total": total, "by_source": by_source}
 
 
+@app.get("/api/neighborhoods")
+def get_neighborhoods(db: Session = Depends(get_db)):
+    rows = (
+        db.query(Listing.neighborhood)
+        .filter(Listing.is_active == True, Listing.neighborhood != None)
+        .distinct()
+        .order_by(Listing.neighborhood)
+        .all()
+    )
+    return [r[0] for r in rows if r[0] and r[0].strip()]
+
+
 @app.post("/api/scrape")
 def trigger_scrape(background_tasks: BackgroundTasks):
+    if not ENABLE_SCHEDULER:
+        return JSONResponse({"status": "scraping runs via GitHub Actions"}, status_code=202)
     background_tasks.add_task(run_scrapers)
     return {"status": "scrape started"}
 
