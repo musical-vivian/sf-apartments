@@ -287,6 +287,176 @@
   </main>
 </div>
 
+<!-- ── Chat button ── -->
+<button id="chat-btn" title="Ask about listings">💬</button>
+
+<!-- ── Chat panel ── -->
+<div id="chat-panel">
+  <div id="chat-header">
+    <span>🏠 Apartment Assistant</span>
+    <button id="chat-close">✕</button>
+  </div>
+  <div id="chat-messages">
+    <div class="msg msg-assistant">
+      <div class="bubble">Hi! I know all the current SF listings. Ask me anything — cheapest studios, which neighborhoods have the most options, listings with both AC and W/D, you name it.</div>
+    </div>
+  </div>
+  <div id="chat-input-area">
+    <input id="chat-input" type="text" placeholder="Ask about the listings…" autocomplete="off" />
+    <button id="chat-send">↑</button>
+  </div>
+</div>
+
+<style>
+  /* ── Chat button ── */
+  #chat-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 22px;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(79,70,229,.4);
+    z-index: 100;
+    transition: transform .15s, box-shadow .15s;
+  }
+  #chat-btn:hover { transform: scale(1.08); box-shadow: 0 6px 20px rgba(79,70,229,.5); }
+
+  /* ── Chat panel ── */
+  #chat-panel {
+    position: fixed;
+    bottom: 88px;
+    right: 24px;
+    width: 380px;
+    height: 560px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.15);
+    display: flex;
+    flex-direction: column;
+    z-index: 99;
+    overflow: hidden;
+    transform: scale(.92) translateY(12px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform .2s, opacity .2s;
+  }
+  #chat-panel.open {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* ── Header ── */
+  #chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: #4f46e5;
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  #chat-close {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,.8);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  #chat-close:hover { background: rgba(255,255,255,.15); color: #fff; }
+
+  /* ── Messages ── */
+  #chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .msg { display: flex; }
+  .msg-user { justify-content: flex-end; }
+  .msg-assistant { justify-content: flex-start; }
+
+  .bubble {
+    max-width: 82%;
+    padding: 9px 13px;
+    border-radius: 14px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg-user .bubble {
+    background: #4f46e5;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg-assistant .bubble {
+    background: #f3f4f6;
+    color: #111827;
+    border-bottom-left-radius: 4px;
+  }
+  .bubble a { color: #4f46e5; }
+  .msg-assistant .bubble a { color: #4338ca; }
+
+  .typing-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #9ca3af;
+    margin: 0 2px;
+    animation: blink 1.2s infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: .2s; }
+  .typing-dot:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+
+  /* ── Input ── */
+  #chat-input-area {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+  #chat-input {
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 20px;
+    font-size: 13.5px;
+    outline: none;
+  }
+  #chat-input:focus { border-color: #4f46e5; }
+  #chat-send {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #chat-send:disabled { background: #d1d5db; cursor: default; }
+</style>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

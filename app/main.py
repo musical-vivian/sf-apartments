@@ -1,12 +1,14 @@
 import os
+import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI, Depends, Query, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .database import Listing, get_db, init_db
@@ -106,6 +108,85 @@ def trigger_alerts(background_tasks: BackgroundTasks):
     from .scheduler import send_daily_alerts
     background_tasks.add_task(send_daily_alerts)
     return {"status": "alerts queued"}
+
+
+# ─── Chat ─────────────────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+
+
+def _format_listings_for_chat(listings) -> str:
+    lines = []
+    for l in listings:
+        price = f"${l.price:,}/mo" if l.price else "price unknown"
+        beds = l.bedrooms or "?"
+        sqft = f"{l.sqft}sqft" if l.sqft else ""
+        nbhd = l.neighborhood or l.address or ""
+        amenities = " | ".join(filter(None, [
+            "AC" if l.has_ac else None,
+            "W/D" if l.has_washer_dryer else None,
+        ]))
+        parts = " | ".join(filter(None, [price, beds, sqft, nbhd, amenities, l.source, l.url]))
+        lines.append(f"- {parts}")
+    return "\n".join(lines)
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "OPENROUTER_API_KEY not configured"}, status_code=500)
+
+    listings = (
+        db.query(Listing)
+        .filter(Listing.is_active == True)
+        .order_by(Listing.first_seen.desc())
+        .limit(200)
+        .all()
+    )
+    context = _format_listings_for_chat(listings)
+
+    system_prompt = f"""You are a helpful SF apartment hunting assistant. \
+You have real-time access to {len(listings)} current listings scraped from \
+Craigslist, Apartments.com, Zillow, and Padmapper — all studio or 1BR in San Francisco, \
+up to $3,500/mo, min 500 sqft, with AC and in-unit W/D.
+
+Current listings:
+{context}
+
+Help the user find apartments, answer questions, compare listings, and make recommendations. \
+When mentioning a specific listing always include its price, neighborhood, and URL."""
+
+    messages_payload = [{"role": m.role, "content": m.content} for m in request.messages]
+
+    async def generate():
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+            )
+            stream = client.chat.completions.create(
+                model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-opus-4"),
+                max_tokens=1024,
+                messages=[{"role": "system", "content": system_prompt}, *messages_payload],
+                stream=True,
+            )
+            for chunk in stream:
+                text = chunk.choices[0].delta.content
+                if text:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 # ─── Static files ─────────────────────────────────────────────────────────────

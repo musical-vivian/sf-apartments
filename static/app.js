@@ -229,6 +229,117 @@ function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// ── Chat ───────────────────────────────────────────────────────────────────────
+
+const chatHistory = [];
+let chatStreaming = false;
+
+const chatPanel = document.getElementById("chat-panel");
+const chatMessages = document.getElementById("chat-messages");
+const chatInput = document.getElementById("chat-input");
+const chatSend = document.getElementById("chat-send");
+
+document.getElementById("chat-btn").addEventListener("click", () => {
+  chatPanel.classList.toggle("open");
+  if (chatPanel.classList.contains("open")) chatInput.focus();
+});
+document.getElementById("chat-close").addEventListener("click", () => {
+  chatPanel.classList.remove("open");
+});
+
+chatInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+chatSend.addEventListener("click", sendChat);
+
+function addMessage(role, text) {
+  const div = document.createElement("div");
+  div.className = `msg msg-${role}`;
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  div.appendChild(bubble);
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return bubble;
+}
+
+function addTypingIndicator() {
+  const div = document.createElement("div");
+  div.className = "msg msg-assistant";
+  div.id = "typing-indicator";
+  div.innerHTML = `<div class="bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>`;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById("typing-indicator");
+  if (el) el.remove();
+}
+
+async function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text || chatStreaming) return;
+
+  chatInput.value = "";
+  chatSend.disabled = true;
+  chatStreaming = true;
+
+  addMessage("user", text);
+  chatHistory.push({ role: "user", content: text });
+
+  addTypingIndicator();
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory }),
+    });
+
+    removeTypingIndicator();
+    const bubble = addMessage("assistant", "");
+    let fullText = "";
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") break;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.text) {
+            fullText += parsed.text;
+            bubble.textContent = fullText;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+          if (parsed.error) bubble.textContent = "Sorry, something went wrong. Try again.";
+        } catch (_) {}
+      }
+    }
+
+    chatHistory.push({ role: "assistant", content: fullText });
+  } catch (_) {
+    removeTypingIndicator();
+    addMessage("assistant", "Sorry, couldn't connect. Try again.");
+  }
+
+  chatStreaming = false;
+  chatSend.disabled = false;
+  chatInput.focus();
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 fetchListings();
