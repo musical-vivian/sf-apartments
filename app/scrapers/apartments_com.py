@@ -1,3 +1,7 @@
+"""
+Rentals.com scraper (replaces Apartments.com which uses Cloudflare blocking).
+Uses Playwright + inline stealth patches.
+"""
 import re
 import logging
 from typing import List, Optional
@@ -7,12 +11,14 @@ from .base import BaseScraper, ListingData, STEALTH_JS
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = (
-    "https://www.apartments.com/san-francisco-ca/"
-    "?max-price=3500&min-beds=0&max-beds=1"
+    "https://www.rentals.com/California/San-Francisco/"
+    "?maxRent=3500&maxBeds=1&minSqft=500"
 )
 
 
 class ApartmentsComScraper(BaseScraper):
+    """Kept as ApartmentsComScraper for scheduler compatibility; now scrapes Rentals.com."""
+
     def scrape(self) -> List[ListingData]:
         try:
             from playwright.sync_api import sync_playwright
@@ -30,26 +36,25 @@ class ApartmentsComScraper(BaseScraper):
                     "Chrome/121.0.0.0 Safari/537.36"
                 ),
                 viewport={"width": 1280, "height": 900},
+                locale="en-US",
             )
             page = context.new_page()
             page.add_init_script(STEALTH_JS)
 
             try:
                 page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(6000)
-                logger.info(f"Apartments.com page title: {page.title()}")
+                page.wait_for_timeout(5000)
+                logger.info(f"Rentals.com page title: {page.title()}")
 
-                page_num = 0
-                while page_num < 5:  # max 5 pages
-                    page_num += 1
+                for page_num in range(3):
                     html = page.content()
                     found = self._parse_html(html)
                     listings.extend(found)
-                    logger.info(f"Apartments.com page {page_num}: found {len(found)} listings")
+                    logger.info(f"Rentals.com page {page_num + 1}: found {len(found)} listings")
 
-                    # Next page
                     next_btn = page.query_selector(
-                        "a[aria-label='Next Page'], a.next, [class*='paging'] a[rel='next']"
+                        "a[aria-label='Next'], a[aria-label='next page'], "
+                        "button[aria-label='Next'], [class*='pagination'] a[rel='next']"
                     )
                     if not next_btn:
                         break
@@ -57,7 +62,7 @@ class ApartmentsComScraper(BaseScraper):
                     page.wait_for_timeout(4000)
 
             except Exception as e:
-                logger.error(f"Apartments.com scrape failed: {e}")
+                logger.error(f"Rentals.com scrape failed: {e}")
             finally:
                 browser.close()
 
@@ -68,13 +73,14 @@ class ApartmentsComScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         listings = []
 
-        # Apartments.com uses <article> tags for listing cards
-        cards = soup.select("article.placard, article[class*='placard'], li[class*='placard']")
-        if not cards:
-            # Fallback: look for any property cards
-            cards = soup.select("[data-listingid], [data-propertyid]")
-
-        logger.info(f"Apartments.com: found {len(cards)} raw cards in HTML")
+        # Rentals.com uses article or li cards with data attributes
+        cards = (
+            soup.select("article[data-id], article[data-listing-id]")
+            or soup.select("[data-listing-id], [data-property-id]")
+            or soup.select("article.rental-card, div.rental-card, li.rental-card")
+            or soup.select("[class*='PropertyCard'], [class*='property-card'], [class*='listing-card']")
+        )
+        logger.info(f"Rentals.com: found {len(cards)} raw cards in HTML")
 
         for card in cards:
             try:
@@ -82,70 +88,64 @@ class ApartmentsComScraper(BaseScraper):
                 if listing:
                     listings.append(listing)
             except Exception as e:
-                logger.warning(f"Apartments.com card parse error: {e}")
+                logger.warning(f"Rentals.com card parse error: {e}")
 
         return listings
 
     def _parse_card(self, card) -> Optional[ListingData]:
-        # URL
-        link = card.select_one("a.property-link, a[href*='apartments.com']")
-        if not link:
-            link = card.select_one("a[href]")
+        link = card.select_one("a[href*='rentals.com']") or card.select_one("a[href]")
         if not link:
             return None
         url = link.get("href", "")
         if not url.startswith("http"):
-            url = "https://www.apartments.com" + url
-        if "apartments.com" not in url:
+            url = "https://www.rentals.com" + url
+        if "rentals.com" not in url:
             return None
 
-        external_id = re.sub(r"https?://[^/]+", "", url).strip("/").replace("/", "_")[-80:]
-
-        title_el = card.select_one(
-            ".property-title, .js-placardTitle, [class*='propertyName'], [class*='property-name']"
+        external_id = (
+            card.get("data-id")
+            or card.get("data-listing-id")
+            or card.get("data-property-id")
+            or re.sub(r"[^a-z0-9_-]", "_", url.replace("https://www.rentals.com", "").strip("/"))[-80:]
         )
-        title = title_el.get_text(strip=True) if title_el else url[:60]
+        if not external_id:
+            return None
+
+        card_text = card.get_text(" ", strip=True)
+        tl = card_text.lower()
 
         price = None
-        price_el = card.select_one(
-            ".price-range, .property-pricing, [class*='price'], [class*='rent']"
-        )
-        if price_el:
-            m = re.search(r"\$\s*([\d,]+)", price_el.get_text())
-            if m:
-                price = int(m.group(1).replace(",", ""))
+        m = re.search(r"\$\s*([\d,]+)", card_text)
+        if m:
+            price = int(m.group(1).replace(",", ""))
 
         bedrooms = None
-        sqft = None
-        info_el = card.select_one(
-            ".property-beds, [class*='bedInfo'], [class*='unitInfo'], [class*='bed']"
-        )
-        if info_el:
-            info_text = info_el.get_text().lower()
-            if "studio" in info_text:
-                bedrooms = "studio"
-            elif re.search(r"1\s*bed", info_text):
-                bedrooms = "1br"
-            m = re.search(r"([\d,]+)\s*(?:sq|ft)", info_text)
-            if m:
-                sqft = int(m.group(1).replace(",", ""))
+        if "studio" in tl:
+            bedrooms = "studio"
+        elif re.search(r"1\s*(?:bed|br)\b", tl):
+            bedrooms = "1br"
 
-        neighborhood = None
-        addr_el = card.select_one(".property-address, [class*='address']")
-        if addr_el:
-            neighborhood = addr_el.get_text(strip=True)
+        sqft = None
+        m = re.search(r"([\d,]+)\s*(?:sq\.?\s*ft|sqft|ft²)", card_text, re.IGNORECASE)
+        if m:
+            try:
+                sqft = int(m.group(1).replace(",", ""))
+            except ValueError:
+                pass
+
+        title_el = card.select_one("[class*='address'], [class*='title'], [class*='name'], h2, h3")
+        title = title_el.get_text(strip=True) if title_el else url[:60]
 
         image_url = None
         img = card.select_one("img[src*='http']")
         if img:
             image_url = img.get("src")
 
-        amenities_text = card.get_text().lower()
-        has_ac = True if any(kw in amenities_text for kw in ["air conditioning", "a/c"]) else None
-        has_wd = True if any(kw in amenities_text for kw in ["in-unit laundry", "washer", "w/d"]) else None
+        has_ac = True if any(kw in tl for kw in ["air conditioning", "a/c"]) else None
+        has_wd = True if any(kw in tl for kw in ["washer", "laundry", "w/d"]) else None
 
         return ListingData(
-            source="apartments.com",
+            source="rentals.com",
             external_id=external_id,
             title=title,
             url=url,
@@ -154,6 +154,6 @@ class ApartmentsComScraper(BaseScraper):
             sqft=sqft,
             has_ac=has_ac,
             has_washer_dryer=has_wd,
-            neighborhood=neighborhood,
+            neighborhood=None,
             image_url=image_url,
         )

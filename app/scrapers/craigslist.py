@@ -74,7 +74,10 @@ class CraigslistScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         listings = []
 
-        cards = soup.select("li.cl-static-search-result, li.cl-search-result, .result-row")
+        # data-pid is stable across CL redesigns; class names change frequently
+        cards = soup.select("[data-pid]")
+        if not cards:
+            cards = soup.select("li.cl-static-search-result, li.cl-search-result, .result-row")
         logger.info(f"Craigslist: found {len(cards)} raw cards in HTML")
 
         for card in cards:
@@ -88,6 +91,9 @@ class CraigslistScraper(BaseScraper):
         return listings
 
     def _parse_card(self, card) -> Optional[ListingData]:
+        # data-pid is the most reliable ID field
+        external_id = card.get("data-pid", "")
+
         link = card.select_one("a[href*='craigslist.org']") or card.select_one("a[href]")
         if not link:
             return None
@@ -95,10 +101,11 @@ class CraigslistScraper(BaseScraper):
         if not url.startswith("http"):
             url = "https://sfbay.craigslist.org" + url
 
-        match = re.search(r"/(\d{10,})\.html", url)
-        if not match:
-            return None
-        external_id = match.group(1)
+        if not external_id:
+            match = re.search(r"/(\d{10,})\.html", url)
+            if not match:
+                return None
+            external_id = match.group(1)
 
         title_el = (
             card.select_one(".posting-title .label")
