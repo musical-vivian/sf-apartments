@@ -258,11 +258,24 @@
     </div>
 
     <div class="filter-group">
+      <label>Min Sqft</label>
+      <select id="filter-sqft">
+        <option value="">Any size</option>
+        <option value="500">500+ sqft</option>
+        <option value="600">600+ sqft</option>
+        <option value="700">700+ sqft</option>
+        <option value="800">800+ sqft</option>
+        <option value="900">900+ sqft</option>
+        <option value="1000">1,000+ sqft</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
       <label>Source</label>
       <div class="source-pills">
         <div class="source-pill active" data-source="">All</div>
         <div class="source-pill" data-source="craigslist">Craigslist</div>
-        <div class="source-pill" data-source="apartments.com">Apts.com</div>
+        <div class="source-pill" data-source="rentals.com">Rentals.com</div>
         <div class="source-pill" data-source="zillow">Zillow</div>
         <div class="source-pill" data-source="padmapper">Padmapper</div>
       </div>

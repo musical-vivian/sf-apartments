@@ -7,6 +7,7 @@ const state = {
   ac: false,
   wd: false,
   maxPrice: "",
+  minSqft: "",
   source: "",
   sort: "newest",
 };
@@ -24,6 +25,7 @@ async function fetchListings() {
   if (state.ac) params.set("has_ac", "true");
   if (state.wd) params.set("has_washer_dryer", "true");
   if (state.maxPrice) params.set("max_price", state.maxPrice);
+  if (state.minSqft) params.set("min_sqft", state.minSqft);
   if (state.source) params.set("source", state.source);
 
   try {
@@ -163,6 +165,9 @@ document.getElementById("filter-wd").addEventListener("change", e => {
 document.getElementById("filter-price").addEventListener("change", e => {
   state.maxPrice = e.target.value; applyFilters();
 });
+document.getElementById("filter-sqft").addEventListener("change", e => {
+  state.minSqft = e.target.value; applyFilters();
+});
 document.getElementById("sort-select").addEventListener("change", e => {
   state.sort = e.target.value; applyFilters();
 });
@@ -180,6 +185,7 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   state.beds = "";
   state.ac = false;
   state.wd = false;
+  state.minSqft = "";
   state.maxPrice = "";
   state.source = "";
   state.sort = "newest";
@@ -187,6 +193,7 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   document.getElementById("filter-ac").checked = false;
   document.getElementById("filter-wd").checked = false;
   document.getElementById("filter-price").value = "";
+  document.getElementById("filter-sqft").value = "";
   document.getElementById("sort-select").value = "newest";
   document.querySelectorAll(".source-pill").forEach(p => p.classList.remove("active"));
   document.querySelector('.source-pill[data-source=""]').classList.add("active");

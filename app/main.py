@@ -50,6 +50,7 @@ def get_listings(
     source: Optional[str] = Query(None),
     bedrooms: Optional[str] = Query(None),
     max_price: Optional[int] = Query(None),
+    min_sqft: Optional[int] = Query(None),
     sort: str = Query("newest"),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -67,6 +68,8 @@ def get_listings(
         q = q.filter(Listing.bedrooms == bedrooms)
     if max_price:
         q = q.filter(Listing.price <= max_price)
+    if min_sqft:
+        q = q.filter(Listing.sqft >= min_sqft)
 
     if sort == "price_asc":
         q = q.order_by(Listing.price.asc().nullslast())
