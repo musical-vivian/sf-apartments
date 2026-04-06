@@ -27,10 +27,9 @@ _scheduler = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _scheduler
-    init_db()
     if ENABLE_SCHEDULER:
+        init_db()
         _scheduler = start_scheduler()
-        # Run an initial scrape on startup if DB is empty
         from .database import SessionLocal
         db = SessionLocal()
         count = db.query(Listing).count()
@@ -38,6 +37,7 @@ async def lifespan(app: FastAPI):
         if count == 0:
             import threading
             threading.Thread(target=run_scrapers, daemon=True).start()
+    # On Vercel (ENABLE_SCHEDULER=false): skip init_db — tables already exist from Railway
     yield
     if _scheduler:
         _scheduler.shutdown()
