@@ -5,22 +5,37 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 
-def fetch_with_scraperapi(url: str) -> str | None:
-    """Fetch a JS-rendered page via ScraperAPI HTTP API. Returns HTML or None."""
-    key = os.getenv("SCRAPERAPI_KEY")
-    if not key:
-        return None
+def run_apify_actor(actor_id: str, run_input: dict) -> list:
+    """Run an Apify actor and return dataset items. Returns [] if token not set or run fails."""
+    token = os.getenv("APIFY_TOKEN")
+    if not token:
+        return []
     import requests
-    from urllib.parse import quote
-    api_url = f"http://api.scraperapi.com?api_key={key}&url={quote(url, safe='')}&render=true"
+    import logging
+    log = logging.getLogger(__name__)
     try:
-        resp = requests.get(api_url, timeout=120)
+        # Start run and wait up to 5 minutes for completion
+        resp = requests.post(
+            f"https://api.apify.com/v2/acts/{actor_id}/runs?waitForFinish=300",
+            json=run_input,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=320,
+        )
         resp.raise_for_status()
-        return resp.text
+        run = resp.json()["data"]
+        if run["status"] != "SUCCEEDED":
+            log.error(f"Apify actor {actor_id} run status: {run['status']}")
+            return []
+        items_resp = requests.get(
+            f"https://api.apify.com/v2/datasets/{run['defaultDatasetId']}/items?limit=200",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        items_resp.raise_for_status()
+        return items_resp.json()
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"ScraperAPI fetch failed for {url}: {e}")
-        return None
+        log.error(f"Apify actor {actor_id} failed: {e}")
+        return []
 
 # Known SF neighborhoods for fallback detection
 SF_NEIGHBORHOODS = [

@@ -1,12 +1,13 @@
 """
-Zillow scraper — uses Playwright to bypass 403 bot protection.
+Zillow scraper — uses Apify's Zillow Search Scraper actor (maxcopell/zillow-scraper).
+Falls back to Playwright if APIFY_TOKEN is not set.
 """
 import re
 import json
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS, fetch_with_scraperapi
+from .base import BaseScraper, ListingData, STEALTH_JS, run_apify_actor, detect_neighborhood
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +20,37 @@ SEARCH_URL = (
     "%22rentHomes%22%3A%7B%22value%22%3Atrue%7D%7D%7D"
 )
 
+APIFY_ACTOR = "X46xKaa20oUA1fRiP"  # maxcopell/zillow-scraper
+
 
 class ZillowScraper(BaseScraper):
     def scrape(self) -> List[ListingData]:
+        items = run_apify_actor(APIFY_ACTOR, {
+            "searchUrls": [{"url": SEARCH_URL}],
+            "maxItems": 100,
+        })
+        if items:
+            logger.info(f"Zillow (Apify): got {len(items)} items")
+            listings = []
+            for item in items:
+                try:
+                    listing = self._parse_item(item)
+                    if listing:
+                        listings.append(listing)
+                except Exception as e:
+                    logger.warning(f"Zillow parse error: {e}")
+            return listings
+
+        # Fallback: Playwright
+        return self._scrape_playwright()
+
+    def _scrape_playwright(self) -> List[ListingData]:
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
             logger.error("Playwright not installed")
             return []
 
-        # Try ScraperAPI first (handles bot detection)
-        html = fetch_with_scraperapi(SEARCH_URL)
-        if html:
-            logger.info("Zillow: using ScraperAPI")
-            return self._process_html(html)
-
-        # Fallback: Playwright
         listings = []
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -50,34 +66,23 @@ class ZillowScraper(BaseScraper):
             page = context.new_page()
             page.add_init_script(STEALTH_JS)
             page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
-
             try:
                 page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_timeout(4000)
-                logger.info(f"Zillow page title: {page.title()}")
-                listings = self._process_html(page.content())
+                html = page.content()
+                data = self._extract_next_data(html)
+                if data:
+                    for item in self._find_listings(data):
+                        try:
+                            listing = self._parse_item(item)
+                            if listing:
+                                listings.append(listing)
+                        except Exception as e:
+                            logger.warning(f"Zillow parse error: {e}")
             except Exception as e:
-                logger.error(f"Zillow scrape failed: {e}")
+                logger.error(f"Zillow Playwright scrape failed: {e}")
             finally:
                 browser.close()
-
-        return listings
-
-    def _process_html(self, html: str) -> List[ListingData]:
-        listings = []
-        data = self._extract_next_data(html)
-        if not data:
-            logger.warning("Zillow: could not find __NEXT_DATA__ in page")
-            return listings
-        results = self._find_listings(data)
-        logger.info(f"Zillow: found {len(results)} raw results")
-        for item in results:
-            try:
-                listing = self._parse_item(item)
-                if listing:
-                    listings.append(listing)
-            except Exception as e:
-                logger.warning(f"Zillow parse error: {e}")
         return listings
 
     def _extract_next_data(self, html: str) -> Optional[dict]:
@@ -116,20 +121,29 @@ class ZillowScraper(BaseScraper):
         return None
 
     def _parse_item(self, item: dict) -> Optional[ListingData]:
-        url = item.get("detailUrl", "")
+        url = item.get("detailUrl") or item.get("url") or item.get("hdpUrl") or ""
         if not url.startswith("http"):
             url = "https://www.zillow.com" + url
+        if not url or "zillow.com" not in url:
+            return None
 
         external_id = str(item.get("zpid") or item.get("id") or "")
+        if not external_id:
+            m = re.search(r"/(\d+)_zpid", url)
+            external_id = m.group(1) if m else ""
         if not external_id:
             return None
 
         title = item.get("address") or item.get("streetAddress") or ""
 
         price = None
-        m = re.search(r"\d[\d,]*", str(item.get("price") or item.get("unformattedPrice") or ""))
-        if m:
-            price = int(m.group().replace(",", ""))
+        for field in ("price", "unformattedPrice", "rentZestimate"):
+            val = item.get(field)
+            if val:
+                m = re.search(r"\d[\d,]*", str(val))
+                if m:
+                    price = int(m.group().replace(",", ""))
+                    break
 
         bedrooms = None
         beds = item.get("beds") or item.get("minBeds")
@@ -137,12 +151,14 @@ class ZillowScraper(BaseScraper):
             bedrooms = "studio" if str(beds) in ("0", "studio") else "1br" if str(beds) == "1" else None
 
         sqft = None
-        area = item.get("area") or item.get("livingArea")
-        if area:
-            try:
-                sqft = int(str(area).replace(",", ""))
-            except ValueError:
-                pass
+        for field in ("area", "livingArea", "lotAreaValue"):
+            area = item.get(field)
+            if area:
+                try:
+                    sqft = int(str(area).replace(",", ""))
+                    break
+                except ValueError:
+                    pass
 
         image_url = None
         imgs = item.get("carouselPhotos") or item.get("imgSrc")
@@ -150,6 +166,8 @@ class ZillowScraper(BaseScraper):
             image_url = imgs[0].get("url") if isinstance(imgs[0], dict) else imgs[0]
         elif isinstance(imgs, str):
             image_url = imgs
+
+        neighborhood = detect_neighborhood(title) or detect_neighborhood(url)
 
         return ListingData(
             source="zillow",
@@ -159,7 +177,7 @@ class ZillowScraper(BaseScraper):
             price=price,
             bedrooms=bedrooms,
             sqft=sqft,
-            neighborhood=item.get("addressCity") or None,
-            address=item.get("address") or None,
+            neighborhood=neighborhood,
+            address=title or None,
             image_url=image_url,
         )
