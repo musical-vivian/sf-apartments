@@ -2,6 +2,25 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+# Inline stealth patches — no external package needed.
+# Hides Playwright automation signals that trigger bot detection.
+STEALTH_JS = """
+() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => { const arr = [1,2,3,4,5]; arr.item = i => arr[i]; return arr; }
+    });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+    const origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (p) =>
+        p.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : origQuery(p);
+}
+"""
+
 
 @dataclass
 class ListingData:

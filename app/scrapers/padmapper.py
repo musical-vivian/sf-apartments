@@ -6,7 +6,7 @@ import re
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData
+from .base import BaseScraper, ListingData, STEALTH_JS
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,6 @@ class PadmapperScraper(BaseScraper):
             logger.error("Playwright not installed")
             return []
 
-        try:
-            from playwright_stealth import stealth_sync
-        except ImportError:
-            stealth_sync = None
-
         listings = []
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -44,13 +39,13 @@ class PadmapperScraper(BaseScraper):
                 locale="en-US",
             )
             page = context.new_page()
-            if stealth_sync:
-                stealth_sync(page)
+            page.add_init_script(STEALTH_JS)
             page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
 
             try:
                 page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_timeout(6000)
+                logger.info(f"Padmapper page title: {page.title()}")
 
                 html = page.content()
                 found = self._parse_html(html)

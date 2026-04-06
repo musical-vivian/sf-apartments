@@ -1,12 +1,11 @@
 """
-Craigslist scraper — uses Playwright + stealth to bypass bot blocking.
-Plain HTTP requests get 403 from Railway IPs; browser rendering avoids this.
+Craigslist scraper — uses Playwright with inline stealth patches.
 """
 import re
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData
+from .base import BaseScraper, ListingData, STEALTH_JS
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +24,8 @@ class CraigslistScraper(BaseScraper):
     def scrape(self) -> List[ListingData]:
         try:
             from playwright.sync_api import sync_playwright
-            from playwright_stealth import stealth_sync
-        except ImportError as e:
-            logger.error(f"Missing dependency: {e}")
+        except ImportError:
+            logger.error("Playwright not installed")
             return []
 
         listings = []
@@ -43,22 +41,22 @@ class CraigslistScraper(BaseScraper):
                 locale="en-US",
             )
             page = context.new_page()
-            stealth_sync(page)
+            page.add_init_script(STEALTH_JS)
             page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
 
             try:
                 page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(4000)
 
-                # Paginate up to 3 pages
+                logger.info(f"Craigslist page title: {page.title()}")
+
                 for page_num in range(3):
                     html = page.content()
                     found = self._parse_html(html)
                     listings.extend(found)
                     logger.info(f"Craigslist page {page_num + 1}: found {len(found)} listings")
 
-                    # Try next page button
-                    next_btn = page.query_selector("a[aria-label='next'], button[aria-label='next'], .cl-page-number ~ a")
+                    next_btn = page.query_selector("a[aria-label='next'], button[aria-label='next']")
                     if not next_btn:
                         break
                     next_btn.click()
@@ -76,12 +74,7 @@ class CraigslistScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         listings = []
 
-        # CL uses li.cl-static-search-result (2024+ layout)
-        cards = soup.select("li.cl-static-search-result, li.cl-search-result")
-        if not cards:
-            # Older layout fallback
-            cards = soup.select(".result-row")
-
+        cards = soup.select("li.cl-static-search-result, li.cl-search-result, .result-row")
         logger.info(f"Craigslist: found {len(cards)} raw cards in HTML")
 
         for card in cards:
@@ -95,7 +88,6 @@ class CraigslistScraper(BaseScraper):
         return listings
 
     def _parse_card(self, card) -> Optional[ListingData]:
-        # URL
         link = card.select_one("a[href*='craigslist.org']") or card.select_one("a[href]")
         if not link:
             return None
@@ -108,7 +100,6 @@ class CraigslistScraper(BaseScraper):
             return None
         external_id = match.group(1)
 
-        # Title
         title_el = (
             card.select_one(".posting-title .label")
             or card.select_one(".title")
@@ -116,7 +107,6 @@ class CraigslistScraper(BaseScraper):
         )
         raw_title = title_el.get_text(strip=True) if title_el else url[:60]
 
-        # Price
         price = None
         price_el = card.select_one(".priceinfo, .price, [class*='price']")
         price_text = price_el.get_text() if price_el else raw_title
@@ -124,7 +114,6 @@ class CraigslistScraper(BaseScraper):
         if m:
             price = int(m.group(1).replace(",", ""))
 
-        # Beds + sqft from housing span
         bedrooms = None
         sqft = None
         housing_el = card.select_one(".housing, [class*='housing'], [class*='meta']")
@@ -139,13 +128,11 @@ class CraigslistScraper(BaseScraper):
         if m:
             sqft = int(m.group(1))
 
-        # Neighborhood from title (text in parens)
         neighborhood = None
         m = re.search(r"\(([^)]+)\)", raw_title)
         if m:
             neighborhood = m.group(1).strip()
 
-        # Image
         image_url = None
         img = card.select_one("img[src]")
         if img:
@@ -159,7 +146,7 @@ class CraigslistScraper(BaseScraper):
             price=price,
             bedrooms=bedrooms,
             sqft=sqft,
-            has_washer_dryer=True,   # guaranteed by laundry=1 filter
+            has_washer_dryer=True,
             has_ac=None,
             neighborhood=neighborhood,
             image_url=image_url,
