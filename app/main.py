@@ -171,7 +171,7 @@ When mentioning a specific listing always include its price, neighborhood, and U
                 base_url="https://openrouter.ai/api/v1",
                 api_key=api_key,
             )
-            model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
+            model = "anthropic/claude-3.5-haiku"
             logger.info(f"Chat: using model {model}")
             stream = client.chat.completions.create(
                 model=model,
