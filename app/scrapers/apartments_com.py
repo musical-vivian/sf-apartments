@@ -20,6 +20,11 @@ class ApartmentsComScraper(BaseScraper):
             logger.error("Playwright not installed")
             return []
 
+        try:
+            from playwright_stealth import stealth_sync
+        except ImportError:
+            stealth_sync = None
+
         listings = []
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -32,10 +37,12 @@ class ApartmentsComScraper(BaseScraper):
                 viewport={"width": 1280, "height": 900},
             )
             page = context.new_page()
+            if stealth_sync:
+                stealth_sync(page)
 
             try:
                 page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(5000)
+                page.wait_for_timeout(6000)
 
                 page_num = 0
                 while page_num < 5:  # max 5 pages

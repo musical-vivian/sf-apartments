@@ -14,8 +14,16 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/121.0.0.0 Safari/537.36"
     ),
-    "Accept": "application/json",
-    "Referer": "https://www.padmapper.com/",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.padmapper.com/apartments/san-francisco-ca",
+    "Origin": "https://www.padmapper.com",
+    "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 # SF bounding box
@@ -26,6 +34,7 @@ SF_BOUNDS = {
     "long_max": -122.357,
 }
 
+# Note: min_sqft and amenity array params cause 405 — omitted
 API_URL = (
     "https://www.padmapper.com/api/t/1/listings"
     "?min_price=500&max_price=3500"
@@ -34,8 +43,6 @@ API_URL = (
     f"&lat_max={SF_BOUNDS['lat_max']}"
     f"&long_min={SF_BOUNDS['long_min']}"
     f"&long_max={SF_BOUNDS['long_max']}"
-    "&min_sqft=500"
-    # Note: amenity array params cause 405 on Padmapper's API — filtering by text instead
 )
 
 

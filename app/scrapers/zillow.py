@@ -28,6 +28,11 @@ class ZillowScraper(BaseScraper):
             logger.error("Playwright not installed")
             return []
 
+        try:
+            from playwright_stealth import stealth_sync
+        except ImportError:
+            stealth_sync = None
+
         listings = []
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -41,6 +46,8 @@ class ZillowScraper(BaseScraper):
                 locale="en-US",
             )
             page = context.new_page()
+            if stealth_sync:
+                stealth_sync(page)
             # Block images/fonts to speed up load and reduce fingerprinting
             page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
 
