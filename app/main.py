@@ -12,15 +12,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .database import Listing, get_db, init_db
-from .scheduler import start_scheduler, run_scrapers
+
+ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "false").lower() == "true"
+
+if ENABLE_SCHEDULER:
+    from .scheduler import start_scheduler, run_scrapers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _scheduler = None
-
-
-ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "false").lower() == "true"
 
 
 @asynccontextmanager
@@ -129,6 +130,8 @@ def trigger_scrape(background_tasks: BackgroundTasks):
 
 @app.post("/api/alerts/send")
 def trigger_alerts(background_tasks: BackgroundTasks):
+    if not ENABLE_SCHEDULER:
+        return JSONResponse({"status": "alerts run via GitHub Actions"}, status_code=202)
     from .scheduler import send_daily_alerts
     background_tasks.add_task(send_daily_alerts)
     return {"status": "alerts queued"}
