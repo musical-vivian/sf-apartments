@@ -6,7 +6,7 @@ import re
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS, detect_neighborhood, fetch_with_scraperapi
+from .base import BaseScraper, ListingData, STEALTH_JS, detect_neighborhood
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +26,6 @@ class PadmapperScraper(BaseScraper):
             logger.error("Playwright not installed")
             return []
 
-        # Try ScraperAPI first
-        html = fetch_with_scraperapi(SEARCH_URL)
-        if html:
-            logger.info("Padmapper: using ScraperAPI")
-            found = self._parse_html(html)
-            logger.info(f"Padmapper: found {len(found)} listings")
-            return found
-
-        # Fallback: Playwright
         listings = []
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
