@@ -7,10 +7,16 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./apartments.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Railway requires SSL for external connections (e.g. from Vercel)
+# Use pg8000 (pure Python) when connecting to PostgreSQL — works on Vercel/Lambda
+# psycopg2 binary extensions don't load reliably in serverless environments
 connect_args = {}
-if DATABASE_URL.startswith("postgresql://") and "sslmode" not in DATABASE_URL:
-    connect_args = {"sslmode": "require"}
+if DATABASE_URL.startswith("postgresql://") and "+pg8000" not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
+    import ssl
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    connect_args = {"ssl_context": ssl_ctx}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
