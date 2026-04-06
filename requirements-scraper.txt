@@ -1,4 +1,4 @@
-playwright==1.42.0
+playwright
 beautifulsoup4==4.12.3
 requests==2.31.0
 sqlalchemy==2.0.27
