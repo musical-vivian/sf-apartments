@@ -6,7 +6,7 @@ import re
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS, detect_neighborhood, get_scraper_proxy
+from .base import BaseScraper, ListingData, STEALTH_JS, detect_neighborhood, fetch_with_scraperapi
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,16 @@ class ApartmentsComScraper(BaseScraper):
             logger.error("Playwright not installed")
             return []
 
+        # Try ScraperAPI first
+        html = fetch_with_scraperapi(SEARCH_URL)
+        if html:
+            logger.info("Rentals.com: using ScraperAPI")
+            found = self._parse_html(html)
+            logger.info(f"Rentals.com: found {len(found)} listings")
+            return found
+
+        # Fallback: Playwright
         listings = []
-        proxy = get_scraper_proxy()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
@@ -38,8 +46,6 @@ class ApartmentsComScraper(BaseScraper):
                 ),
                 viewport={"width": 1280, "height": 900},
                 locale="en-US",
-                proxy=proxy,
-                ignore_https_errors=bool(proxy),
             )
             page = context.new_page()
             page.add_init_script(STEALTH_JS)

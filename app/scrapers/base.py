@@ -5,16 +5,22 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 
-def get_scraper_proxy() -> dict | None:
-    """Return Playwright proxy config for ScraperAPI if key is set."""
+def fetch_with_scraperapi(url: str) -> str | None:
+    """Fetch a JS-rendered page via ScraperAPI HTTP API. Returns HTML or None."""
     key = os.getenv("SCRAPERAPI_KEY")
     if not key:
         return None
-    return {
-        "server": "http://proxy-server.scraperapi.com:8001",
-        "username": "scraperapi",
-        "password": key,
-    }
+    import requests
+    from urllib.parse import quote
+    api_url = f"http://api.scraperapi.com?api_key={key}&url={quote(url, safe='')}&render=true"
+    try:
+        resp = requests.get(api_url, timeout=120)
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"ScraperAPI fetch failed for {url}: {e}")
+        return None
 
 # Known SF neighborhoods for fallback detection
 SF_NEIGHBORHOODS = [

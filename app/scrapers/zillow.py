@@ -6,7 +6,7 @@ import json
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS, get_scraper_proxy
+from .base import BaseScraper, ListingData, STEALTH_JS, fetch_with_scraperapi
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,14 @@ class ZillowScraper(BaseScraper):
             logger.error("Playwright not installed")
             return []
 
+        # Try ScraperAPI first (handles bot detection)
+        html = fetch_with_scraperapi(SEARCH_URL)
+        if html:
+            logger.info("Zillow: using ScraperAPI")
+            return self._process_html(html)
+
+        # Fallback: Playwright
         listings = []
-        proxy = get_scraper_proxy()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
@@ -40,39 +46,38 @@ class ZillowScraper(BaseScraper):
                 ),
                 viewport={"width": 1440, "height": 900},
                 locale="en-US",
-                proxy=proxy,
-                ignore_https_errors=bool(proxy),
             )
             page = context.new_page()
             page.add_init_script(STEALTH_JS)
-            # Block images/fonts to speed up load and reduce fingerprinting
             page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
 
             try:
                 page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_timeout(4000)
-
                 logger.info(f"Zillow page title: {page.title()}")
-                html = page.content()
-                data = self._extract_next_data(html)
-                if not data:
-                    logger.warning("Zillow: could not find __NEXT_DATA__ in page")
-                else:
-                    results = self._find_listings(data)
-                    logger.info(f"Zillow: found {len(results)} raw results")
-                    for item in results:
-                        try:
-                            listing = self._parse_item(item)
-                            if listing:
-                                listings.append(listing)
-                        except Exception as e:
-                            logger.warning(f"Zillow parse error: {e}")
-
+                listings = self._process_html(page.content())
             except Exception as e:
                 logger.error(f"Zillow scrape failed: {e}")
             finally:
                 browser.close()
 
+        return listings
+
+    def _process_html(self, html: str) -> List[ListingData]:
+        listings = []
+        data = self._extract_next_data(html)
+        if not data:
+            logger.warning("Zillow: could not find __NEXT_DATA__ in page")
+            return listings
+        results = self._find_listings(data)
+        logger.info(f"Zillow: found {len(results)} raw results")
+        for item in results:
+            try:
+                listing = self._parse_item(item)
+                if listing:
+                    listings.append(listing)
+            except Exception as e:
+                logger.warning(f"Zillow parse error: {e}")
         return listings
 
     def _extract_next_data(self, html: str) -> Optional[dict]:
