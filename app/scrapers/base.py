@@ -1,7 +1,20 @@
+import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+
+def get_scraper_proxy() -> dict | None:
+    """Return Playwright proxy config for ScraperAPI if key is set."""
+    key = os.getenv("SCRAPERAPI_KEY")
+    if not key:
+        return None
+    return {
+        "server": "http://proxy-server.scraperapi.com:8001",
+        "username": "scraperapi",
+        "password": key,
+    }
 
 # Known SF neighborhoods for fallback detection
 SF_NEIGHBORHOODS = [

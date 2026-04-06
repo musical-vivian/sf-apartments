@@ -26,4 +26,5 @@ jobs:
       - name: Run scrapers
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
         run: python -m app.run_scrapers

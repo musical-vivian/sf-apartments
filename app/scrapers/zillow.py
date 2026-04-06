@@ -6,7 +6,7 @@ import json
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS
+from .base import BaseScraper, ListingData, STEALTH_JS, get_scraper_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class ZillowScraper(BaseScraper):
             return []
 
         listings = []
+        proxy = get_scraper_proxy()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
@@ -39,6 +40,8 @@ class ZillowScraper(BaseScraper):
                 ),
                 viewport={"width": 1440, "height": 900},
                 locale="en-US",
+                proxy=proxy,
+                ignore_https_errors=bool(proxy),
             )
             page = context.new_page()
             page.add_init_script(STEALTH_JS)
