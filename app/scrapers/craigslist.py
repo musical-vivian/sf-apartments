@@ -5,7 +5,7 @@ import re
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS
+from .base import BaseScraper, ListingData, STEALTH_JS, detect_neighborhood
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,8 @@ class CraigslistScraper(BaseScraper):
         m = re.search(r"\(([^)]+)\)", raw_title)
         if m:
             neighborhood = m.group(1).strip()
+        if not neighborhood:
+            neighborhood = detect_neighborhood(raw_title)
 
         image_url = None
         img = card.select_one("img[src]")

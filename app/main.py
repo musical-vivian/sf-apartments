@@ -95,6 +95,23 @@ def get_listings(
     }
 
 
+@app.post("/api/backfill-neighborhoods")
+def backfill_neighborhoods(db: Session = Depends(get_db)):
+    from .scrapers.base import detect_neighborhood
+    listings = db.query(Listing).filter(
+        Listing.neighborhood == None, Listing.is_active == True
+    ).all()
+    updated = 0
+    for l in listings:
+        text = " ".join(filter(None, [l.title, l.address, l.url]))
+        nbhd = detect_neighborhood(text)
+        if nbhd:
+            l.neighborhood = nbhd
+            updated += 1
+    db.commit()
+    return {"updated": updated, "total_checked": len(listings)}
+
+
 @app.get("/api/health")
 def health(db: Session = Depends(get_db)):
     try:

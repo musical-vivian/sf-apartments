@@ -6,7 +6,7 @@ import re
 import logging
 from typing import List, Optional
 
-from .base import BaseScraper, ListingData, STEALTH_JS
+from .base import BaseScraper, ListingData, STEALTH_JS, detect_neighborhood
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,7 @@ class PadmapperScraper(BaseScraper):
         # Title / address
         title_el = card.select_one("[class*='address'], [class*='title'], [class*='name']")
         title = title_el.get_text(strip=True) if title_el else url[:60]
+        neighborhood = detect_neighborhood(card_text) or detect_neighborhood(url)
 
         # Image
         image_url = None
@@ -154,6 +155,6 @@ class PadmapperScraper(BaseScraper):
             sqft=sqft,
             has_ac=has_ac,
             has_washer_dryer=has_wd,
-            neighborhood=None,
+            neighborhood=neighborhood,
             image_url=image_url,
         )
