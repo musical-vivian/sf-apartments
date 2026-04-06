@@ -57,6 +57,7 @@ def get_listings(
     max_price: Optional[int] = Query(None),
     min_sqft: Optional[int] = Query(None),
     neighborhood: Optional[str] = Query(None),
+    neighborhoods: Optional[str] = Query(None),
     sort: str = Query("newest"),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -76,7 +77,11 @@ def get_listings(
         q = q.filter(Listing.price <= max_price)
     if min_sqft:
         q = q.filter(Listing.sqft >= min_sqft)
-    if neighborhood:
+    if neighborhoods:
+        nbhd_list = [n.strip() for n in neighborhoods.split(",") if n.strip()]
+        if nbhd_list:
+            q = q.filter(Listing.neighborhood.in_(nbhd_list))
+    elif neighborhood:
         q = q.filter(Listing.neighborhood == neighborhood)
 
     if sort == "price_asc":

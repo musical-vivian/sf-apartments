@@ -8,7 +8,7 @@ const state = {
   wd: false,
   maxPrice: "",
   minSqft: "",
-  neighborhood: "",
+  neighborhoods: [],
   source: "",
   sort: "newest",
 };
@@ -27,7 +27,7 @@ async function fetchListings() {
   if (state.wd) params.set("has_washer_dryer", "true");
   if (state.maxPrice) params.set("max_price", state.maxPrice);
   if (state.minSqft) params.set("min_sqft", state.minSqft);
-  if (state.neighborhood) params.set("neighborhood", state.neighborhood);
+  if (state.neighborhoods.length) params.set("neighborhoods", state.neighborhoods.join(","));
   if (state.source) params.set("source", state.source);
 
   try {
@@ -183,20 +183,24 @@ document.querySelectorAll(".source-pill").forEach(pill =>
   })
 );
 
-document.getElementById("filter-neighborhood").addEventListener("change", e => {
-  state.neighborhood = e.target.value; applyFilters();
-});
-
 async function loadNeighborhoods() {
   try {
     const res = await fetch("/api/neighborhoods");
     const neighborhoods = await res.json();
-    const sel = document.getElementById("filter-neighborhood");
+    const container = document.getElementById("filter-neighborhood");
     neighborhoods.forEach(n => {
-      const opt = document.createElement("option");
-      opt.value = n;
-      opt.textContent = n;
-      sel.appendChild(opt);
+      const label = document.createElement("label");
+      label.className = "checkbox-row";
+      label.innerHTML = `<input type="checkbox" value="${escHtml(n)}" />${escHtml(n)}`;
+      label.querySelector("input").addEventListener("change", e => {
+        if (e.target.checked) {
+          state.neighborhoods.push(n);
+        } else {
+          state.neighborhoods = state.neighborhoods.filter(x => x !== n);
+        }
+        applyFilters();
+      });
+      container.appendChild(label);
     });
   } catch (_) {}
 }
@@ -208,7 +212,7 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   state.wd = false;
   state.minSqft = "";
   state.maxPrice = "";
-  state.neighborhood = "";
+  state.neighborhoods = [];
   state.source = "";
   state.sort = "newest";
   document.querySelector('input[name="beds"][value=""]').checked = true;
@@ -216,7 +220,7 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   document.getElementById("filter-wd").checked = false;
   document.getElementById("filter-price").value = "";
   document.getElementById("filter-sqft").value = "";
-  document.getElementById("filter-neighborhood").value = "";
+  document.querySelectorAll("#filter-neighborhood input[type='checkbox']").forEach(cb => cb.checked = false);
   document.getElementById("sort-select").value = "newest";
   document.querySelectorAll(".source-pill").forEach(p => p.classList.remove("active"));
   document.querySelector('.source-pill[data-source=""]').classList.add("active");
