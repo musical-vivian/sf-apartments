@@ -75,7 +75,7 @@ function renderCard(l) {
   const location = l.neighborhood || l.address || "";
 
   const imgTag = l.image_url
-    ? `<img class="card-img" src="${escHtml(l.image_url)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=card-img-placeholder>🏠</div>'" />`
+    ? `<img class="card-img" src="${escHtml(l.image_url)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.innerHTML='<div class=card-img-placeholder>🏠</div>'" />`
     : `<div class="card-img-placeholder">🏠</div>`;
 
   const badges = [
