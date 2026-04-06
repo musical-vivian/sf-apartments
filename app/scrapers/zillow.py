@@ -1,70 +1,80 @@
+"""
+Zillow scraper — uses Playwright to bypass 403 bot protection.
+"""
 import re
 import json
-import urllib.parse
 import logging
 from typing import List, Optional
-
-import requests
 
 from .base import BaseScraper, ListingData
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/121.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-}
-
-_FILTER_STATE = {
-    "price": {"max": 3500},
-    "beds": {"max": 1},
-    "sqft": {"min": 500},
-    "rentHomes": {"value": True},
-    "hasAirConditioning": {"value": True},   # AC filter
-    "hasInUnitLaundry": {"value": True},     # in-unit W/D filter
-}
-_SEARCH_QUERY = urllib.parse.quote(json.dumps({"filterState": _FILTER_STATE}))
-SEARCH_URL = f"https://www.zillow.com/san-francisco-ca/rentals/?searchQueryState={_SEARCH_QUERY}"
+SEARCH_URL = (
+    "https://www.zillow.com/san-francisco-ca/rentals/"
+    "?searchQueryState=%7B%22filterState%22%3A%7B"
+    "%22price%22%3A%7B%22max%22%3A3500%7D%2C"
+    "%22beds%22%3A%7B%22max%22%3A1%7D%2C"
+    "%22sqft%22%3A%7B%22min%22%3A500%7D%2C"
+    "%22rentHomes%22%3A%7B%22value%22%3Atrue%7D%7D%7D"
+)
 
 
 class ZillowScraper(BaseScraper):
-    """
-    Parses Zillow's __NEXT_DATA__ JSON payload embedded in the page HTML.
-    Note: Zillow has aggressive bot detection — this may occasionally fail.
-    """
-
     def scrape(self) -> List[ListingData]:
-        listings = []
         try:
-            resp = requests.get(SEARCH_URL, headers=HEADERS, timeout=30)
-            resp.raise_for_status()
-            data = self._extract_next_data(resp.text)
-            if not data:
-                logger.warning("Zillow: could not extract __NEXT_DATA__")
-                return listings
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            logger.error("Playwright not installed")
+            return []
 
-            results = self._find_listings(data)
-            for item in results:
-                try:
-                    listing = self._parse_item(item)
-                    if listing:
-                        listings.append(listing)
-                except Exception as e:
-                    logger.warning(f"Zillow parse error: {e}")
+        listings = []
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/121.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1440, "height": 900},
+                locale="en-US",
+            )
+            page = context.new_page()
+            # Block images/fonts to speed up load and reduce fingerprinting
+            page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
 
-        except Exception as e:
-            logger.error(f"Zillow scrape failed: {e}")
+            try:
+                page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
+                page.wait_for_timeout(4000)
+
+                html = page.content()
+                data = self._extract_next_data(html)
+                if not data:
+                    logger.warning("Zillow: could not find __NEXT_DATA__ in page")
+                else:
+                    results = self._find_listings(data)
+                    logger.info(f"Zillow: found {len(results)} raw results")
+                    for item in results:
+                        try:
+                            listing = self._parse_item(item)
+                            if listing:
+                                listings.append(listing)
+                        except Exception as e:
+                            logger.warning(f"Zillow parse error: {e}")
+
+            except Exception as e:
+                logger.error(f"Zillow scrape failed: {e}")
+            finally:
+                browser.close()
 
         return listings
 
     def _extract_next_data(self, html: str) -> Optional[dict]:
-        m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
+        m = re.search(
+            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+            html, re.DOTALL
+        )
         if m:
             try:
                 return json.loads(m.group(1))
@@ -74,13 +84,10 @@ class ZillowScraper(BaseScraper):
 
     def _find_listings(self, data: dict) -> list:
         try:
-            cat1 = (
-                data["props"]["pageProps"]["searchPageState"]["cat1"]
-            )
+            cat1 = data["props"]["pageProps"]["searchPageState"]["cat1"]
             return cat1["searchResults"]["listResults"]
         except (KeyError, TypeError):
             pass
-        # Fallback: search recursively for listResults key
         return self._deep_find(data, "listResults") or []
 
     def _deep_find(self, obj, key):
@@ -88,14 +95,14 @@ class ZillowScraper(BaseScraper):
             if key in obj:
                 return obj[key]
             for v in obj.values():
-                result = self._deep_find(v, key)
-                if result:
-                    return result
+                r = self._deep_find(v, key)
+                if r:
+                    return r
         elif isinstance(obj, list):
             for item in obj:
-                result = self._deep_find(item, key)
-                if result:
-                    return result
+                r = self._deep_find(item, key)
+                if r:
+                    return r
         return None
 
     def _parse_item(self, item: dict) -> Optional[ListingData]:
@@ -103,26 +110,21 @@ class ZillowScraper(BaseScraper):
         if not url.startswith("http"):
             url = "https://www.zillow.com" + url
 
-        external_id = item.get("zpid") or item.get("id")
+        external_id = str(item.get("zpid") or item.get("id") or "")
         if not external_id:
             return None
-        external_id = str(external_id)
 
         title = item.get("address") or item.get("streetAddress") or ""
 
         price = None
-        price_str = item.get("price") or item.get("unformattedPrice") or ""
-        m = re.search(r"\d[\d,]*", str(price_str))
+        m = re.search(r"\d[\d,]*", str(item.get("price") or item.get("unformattedPrice") or ""))
         if m:
             price = int(m.group().replace(",", ""))
 
         bedrooms = None
         beds = item.get("beds") or item.get("minBeds")
         if beds is not None:
-            if str(beds) in ("0", "studio"):
-                bedrooms = "studio"
-            elif str(beds) == "1":
-                bedrooms = "1br"
+            bedrooms = "studio" if str(beds) in ("0", "studio") else "1br" if str(beds) == "1" else None
 
         sqft = None
         area = item.get("area") or item.get("livingArea")
@@ -132,13 +134,10 @@ class ZillowScraper(BaseScraper):
             except ValueError:
                 pass
 
-        neighborhood = item.get("addressState") or None
-        address = item.get("address") or None
-
         image_url = None
         imgs = item.get("carouselPhotos") or item.get("imgSrc")
         if isinstance(imgs, list) and imgs:
-            image_url = imgs[0].get("url") or imgs[0]
+            image_url = imgs[0].get("url") if isinstance(imgs[0], dict) else imgs[0]
         elif isinstance(imgs, str):
             image_url = imgs
 
@@ -150,7 +149,7 @@ class ZillowScraper(BaseScraper):
             price=price,
             bedrooms=bedrooms,
             sqft=sqft,
-            neighborhood=neighborhood,
-            address=address,
+            neighborhood=item.get("addressCity") or None,
+            address=item.get("address") or None,
             image_url=image_url,
         )

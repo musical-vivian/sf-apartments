@@ -6,10 +6,8 @@ from .base import BaseScraper, ListingData
 
 logger = logging.getLogger(__name__)
 
-# Amenity slugs are encoded in the URL path on Apartments.com
 SEARCH_URL = (
     "https://www.apartments.com/san-francisco-ca/"
-    "air-conditioning-washer-dryer-in-unit/"
     "?max-price=3500&min-beds=0&max-beds=1"
 )
 
@@ -36,29 +34,25 @@ class ApartmentsComScraper(BaseScraper):
             page = context.new_page()
 
             try:
-                page.goto(SEARCH_URL, timeout=60000, wait_until="networkidle")
-                page.wait_for_timeout(3000)
+                page.goto(SEARCH_URL, timeout=60000, wait_until="domcontentloaded")
+                page.wait_for_timeout(5000)
 
-                # Apply amenity filters via UI in case URL path didn't encode them
-                self._apply_amenity_filters(page)
+                page_num = 0
+                while page_num < 5:  # max 5 pages
+                    page_num += 1
+                    html = page.content()
+                    found = self._parse_html(html)
+                    listings.extend(found)
+                    logger.info(f"Apartments.com page {page_num}: found {len(found)} listings")
 
-                # Paginate through results
-                while True:
-                    cards = page.query_selector_all("article.placard, [class*='placardContainer'] article")
-                    for card in cards:
-                        try:
-                            listing = self._parse_card(card)
-                            if listing:
-                                listings.append(listing)
-                        except Exception as e:
-                            logger.warning(f"Apartments.com card parse error: {e}")
-
-                    # Try to go to next page
-                    next_btn = page.query_selector("a[data-page='next'], .next-page a, button.next")
+                    # Next page
+                    next_btn = page.query_selector(
+                        "a[aria-label='Next Page'], a.next, [class*='paging'] a[rel='next']"
+                    )
                     if not next_btn:
                         break
                     next_btn.click()
-                    page.wait_for_timeout(3000)
+                    page.wait_for_timeout(4000)
 
             except Exception as e:
                 logger.error(f"Apartments.com scrape failed: {e}")
@@ -67,112 +61,86 @@ class ApartmentsComScraper(BaseScraper):
 
         return listings
 
-    def _apply_amenity_filters(self, page):
-        """Click AC + in-unit W/D checkboxes in the filter panel if accessible."""
-        try:
-            # Open the filter/amenities panel
-            for selector in [
-                "button[data-tid='desktop-filter-amenities']",
-                "button:text('Amenities')",
-                "button:text('More Filters')",
-            ]:
-                btn = page.query_selector(selector)
-                if btn:
-                    btn.click()
-                    page.wait_for_timeout(1500)
-                    break
+    def _parse_html(self, html: str) -> List[ListingData]:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "lxml")
+        listings = []
 
-            # Check Air Conditioning
-            for selector in [
-                "label:has-text('Air Conditioning') input",
-                "input[value='air-conditioning']",
-                "input[id*='airConditioning']",
-            ]:
-                el = page.query_selector(selector)
-                if el and not el.is_checked():
-                    el.check()
-                    break
+        # Apartments.com uses <article> tags for listing cards
+        cards = soup.select("article.placard, article[class*='placard'], li[class*='placard']")
+        if not cards:
+            # Fallback: look for any property cards
+            cards = soup.select("[data-listingid], [data-propertyid]")
 
-            # Check In-unit Washer/Dryer
-            for selector in [
-                "label:has-text('Washer/Dryer in Unit') input",
-                "label:has-text('In-Unit Laundry') input",
-                "input[value='washer-dryer-in-unit']",
-                "input[id*='washerDryer']",
-            ]:
-                el = page.query_selector(selector)
-                if el and not el.is_checked():
-                    el.check()
-                    break
+        logger.info(f"Apartments.com: found {len(cards)} raw cards in HTML")
 
-            # Apply / close
-            for selector in ["button:text('Apply')", "button:text('See Results')", "button:text('Done')"]:
-                btn = page.query_selector(selector)
-                if btn:
-                    btn.click()
-                    page.wait_for_timeout(2000)
-                    break
+        for card in cards:
+            try:
+                listing = self._parse_card(card)
+                if listing:
+                    listings.append(listing)
+            except Exception as e:
+                logger.warning(f"Apartments.com card parse error: {e}")
 
-        except Exception as e:
-            logger.debug(f"Amenity filter UI interaction skipped: {e}")
+        return listings
 
     def _parse_card(self, card) -> Optional[ListingData]:
-        # URL and external ID
-        link = card.query_selector("a.property-link, a[href*='apartments.com']")
+        # URL
+        link = card.select_one("a.property-link, a[href*='apartments.com']")
+        if not link:
+            link = card.select_one("a[href]")
         if not link:
             return None
-        url = link.get_attribute("href") or ""
+        url = link.get("href", "")
         if not url.startswith("http"):
             url = "https://www.apartments.com" + url
+        if "apartments.com" not in url:
+            return None
 
-        # Use URL path as external ID
-        external_id = re.sub(r"https?://[^/]+", "", url).strip("/").replace("/", "_") or url[-50:]
+        external_id = re.sub(r"https?://[^/]+", "", url).strip("/").replace("/", "_")[-80:]
 
-        title_el = card.query_selector(".property-title, .js-placardTitle, [class*='propertyName']")
-        title = title_el.inner_text().strip() if title_el else url
+        title_el = card.select_one(
+            ".property-title, .js-placardTitle, [class*='propertyName'], [class*='property-name']"
+        )
+        title = title_el.get_text(strip=True) if title_el else url[:60]
 
         price = None
-        price_el = card.query_selector(".price-range, .property-pricing, [class*='price']")
+        price_el = card.select_one(
+            ".price-range, .property-pricing, [class*='price'], [class*='rent']"
+        )
         if price_el:
-            m = re.search(r"\$\s*(\d[\d,]*)", price_el.inner_text())
+            m = re.search(r"\$\s*([\d,]+)", price_el.get_text())
             if m:
                 price = int(m.group(1).replace(",", ""))
 
         bedrooms = None
         sqft = None
-        info_el = card.query_selector(".property-beds, [class*='bedInfo'], [class*='unitInfo']")
+        info_el = card.select_one(
+            ".property-beds, [class*='bedInfo'], [class*='unitInfo'], [class*='bed']"
+        )
         if info_el:
-            info_text = info_el.inner_text().lower()
+            info_text = info_el.get_text().lower()
             if "studio" in info_text:
                 bedrooms = "studio"
-            elif "1 bed" in info_text or "1bed" in info_text:
+            elif re.search(r"1\s*bed", info_text):
                 bedrooms = "1br"
-            m = re.search(r"(\d{3,4})\s*(?:sq|ft)", info_text)
+            m = re.search(r"([\d,]+)\s*(?:sq|ft)", info_text)
             if m:
-                sqft = int(m.group(1))
+                sqft = int(m.group(1).replace(",", ""))
 
         neighborhood = None
-        addr_el = card.query_selector(".property-address, [class*='address']")
+        addr_el = card.select_one(".property-address, [class*='address']")
         if addr_el:
-            neighborhood = addr_el.inner_text().strip()
+            neighborhood = addr_el.get_text(strip=True)
 
         image_url = None
-        img = card.query_selector("img[src*='apartments.com'], img[src*='cloudfront'], img[src*='rezinc']")
+        img = card.select_one("img[src*='http']")
         if img:
-            image_url = img.get_attribute("src")
+            image_url = img.get("src")
 
-        # Amenities (may be shown inline on card)
-        amenities_text = ""
-        amenities_el = card.query_selector("[class*='amenities'], [class*='tags']")
-        if amenities_el:
-            amenities_text = amenities_el.inner_text().lower()
-
-        has_ac = "air conditioning" in amenities_text or "a/c" in amenities_text or None
-        has_wd = (
-            "in-unit laundry" in amenities_text
-            or "washer" in amenities_text
-            or None
-        )
+        amenities_text = card.get_text().lower()
+        has_ac = True if any(kw in amenities_text for kw in ["air conditioning", "a/c"]) else None
+        has_wd = True if any(kw in amenities_text for kw in ["in-unit laundry", "washer", "w/d"]) else None
 
         return ListingData(
             source="apartments.com",
@@ -182,8 +150,8 @@ class ApartmentsComScraper(BaseScraper):
             price=price,
             bedrooms=bedrooms,
             sqft=sqft,
-            has_ac=has_ac if has_ac is not None else None,
-            has_washer_dryer=has_wd if has_wd is not None else None,
+            has_ac=has_ac,
+            has_washer_dryer=has_wd,
             neighborhood=neighborhood,
             image_url=image_url,
         )

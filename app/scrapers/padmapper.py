@@ -35,8 +35,7 @@ API_URL = (
     f"&long_min={SF_BOUNDS['long_min']}"
     f"&long_max={SF_BOUNDS['long_max']}"
     "&min_sqft=500"
-    "&amenities[]=air_conditioning"   # AC filter
-    "&amenities[]=in_unit_laundry"    # in-unit W/D filter
+    # Note: amenity array params cause 405 on Padmapper's API — filtering by text instead
 )
 
 

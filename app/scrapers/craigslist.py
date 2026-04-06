@@ -1,3 +1,7 @@
+"""
+Craigslist scraper — uses the RSS feed for stable parsing.
+The HTML UI changes frequently; the RSS format is far more reliable.
+"""
 import re
 import time
 import logging
@@ -19,16 +23,17 @@ HEADERS = {
 }
 
 BASE_URL = "https://sfbay.craigslist.org"
-SEARCH_URL = (
-    BASE_URL
-    + "/search/sfc/apa"
-    "?max_price=3500"
+# laundry=1 = in-unit W/D (valid CL filter param)
+# Note: air_conditioning is not a valid CL URL param — we detect it from listing text
+RSS_URL = (
+    BASE_URL + "/search/sfc/apa"
+    "?format=rss"
+    "&max_price=3500"
     "&min_bedrooms=0&max_bedrooms=1"
     "&min_sqft=500"
+    "&laundry=1"
     "&availabilityMode=0"
     "&hasPic=1"
-    "&laundry=1"           # in-unit W/D (Craigslist native filter)
-    "&air_conditioning=1"  # has AC (Craigslist native filter)
 )
 
 
@@ -36,98 +41,104 @@ class CraigslistScraper(BaseScraper):
     def scrape(self) -> List[ListingData]:
         listings = []
         offset = 0
+
         while True:
-            url = SEARCH_URL + f"&s={offset}"
+            url = RSS_URL + f"&s={offset}"
             try:
                 resp = requests.get(url, headers=HEADERS, timeout=30)
                 resp.raise_for_status()
             except Exception as e:
-                logger.error(f"Craigslist fetch failed (offset={offset}): {e}")
+                logger.error(f"Craigslist RSS fetch failed (offset={offset}): {e}")
                 break
 
-            soup = BeautifulSoup(resp.text, "lxml")
-            results = soup.select("li.cl-search-result")
-            if not results:
+            soup = BeautifulSoup(resp.text, "xml")
+            items = soup.find_all("item")
+            if not items:
                 break
 
-            for result in results:
+            for item in items:
                 try:
-                    listing = self._parse_result(result)
+                    listing = self._parse_item(item)
                     if listing:
                         listings.append(listing)
                 except Exception as e:
-                    logger.warning(f"CL parse error: {e}")
+                    logger.warning(f"CL item parse error: {e}")
 
-            # Craigslist returns 120 results per page
-            if len(results) < 120:
+            if len(items) < 120:
                 break
             offset += 120
             time.sleep(1)
 
-        # Enrich new-looking listings with full page details (AC, W/D)
+        # Enrich listings for AC and extra details
         for listing in listings:
             try:
                 self._enrich(listing)
-                time.sleep(0.5)
+                time.sleep(0.4)
             except Exception as e:
-                logger.warning(f"CL enrich error for {listing.external_id}: {e}")
+                logger.warning(f"CL enrich error {listing.external_id}: {e}")
 
         return listings
 
-    def _parse_result(self, result) -> Optional[ListingData]:
-        link = result.select_one("a.posting-title") or result.select_one("a[href*='/apa/']")
-        if not link:
+    def _parse_item(self, item) -> Optional[ListingData]:
+        link_tag = item.find("link")
+        if not link_tag:
             return None
-
-        url = link.get("href", "")
+        # In RSS, <link> text is sometimes after a newline
+        url = (link_tag.next_sibling or link_tag.get_text()).strip()
         if not url.startswith("http"):
-            url = BASE_URL + url
+            return None
 
         match = re.search(r"/(\d{10,})\.html", url)
         if not match:
             return None
         external_id = match.group(1)
 
-        title = link.get_text(strip=True)
+        title_tag = item.find("title")
+        raw_title = title_tag.get_text(strip=True) if title_tag else ""
 
+        # Parse price from title: "$2,800 1br - ..."
         price = None
-        price_el = result.select_one(".priceinfo") or result.select_one(".price")
-        if price_el:
-            m = re.search(r"\d[\d,]*", price_el.get_text())
-            if m:
-                price = int(m.group().replace(",", ""))
+        m = re.search(r"\$\s*([\d,]+)", raw_title)
+        if m:
+            price = int(m.group(1).replace(",", ""))
 
+        # Bedrooms from title
         bedrooms = None
+        tl = raw_title.lower()
+        if "studio" in tl:
+            bedrooms = "studio"
+        elif re.search(r"1\s*br\b", tl):
+            bedrooms = "1br"
+
+        # Sqft from title: "645ft" or "645 ft²"
         sqft = None
-        housing_el = result.select_one(".housing")
-        if housing_el:
-            ht = housing_el.get_text().lower()
-            if "studio" in ht:
-                bedrooms = "studio"
-            elif "1br" in ht or "1 br" in ht:
-                bedrooms = "1br"
-            m = re.search(r"(\d{3,4})ft", ht)
-            if m:
-                sqft = int(m.group(1))
+        m = re.search(r"(\d{3,4})\s*ft", raw_title, re.IGNORECASE)
+        if m:
+            sqft = int(m.group(1))
 
+        # Neighborhood from title (text in parentheses)
         neighborhood = None
-        loc_el = result.select_one(".cl-app-anchor.maptag") or result.select_one(".meta .maptag")
-        if loc_el:
-            neighborhood = loc_el.get_text(strip=True)
+        m = re.search(r"\(([^)]+)\)", raw_title)
+        if m:
+            neighborhood = m.group(1).strip()
 
+        # Image from enclosure
         image_url = None
-        img = result.select_one("img")
-        if img:
-            image_url = img.get("src") or img.get("data-src")
+        enc = item.find("enclosure")
+        if enc:
+            image_url = enc.get("resource") or enc.get("url")
 
+        # Since we filtered with laundry=1, all results have in-unit W/D
         return ListingData(
             source="craigslist",
             external_id=external_id,
-            title=title,
+            title=raw_title,
             url=url,
             price=price,
             bedrooms=bedrooms,
             sqft=sqft,
+            has_washer_dryer=True,   # guaranteed by laundry=1 filter
+            has_ac=None,             # checked in _enrich
             neighborhood=neighborhood,
             image_url=image_url,
         )
@@ -139,27 +150,27 @@ class CraigslistScraper(BaseScraper):
 
         attrs_text = " ".join(
             span.get_text(strip=True).lower()
-            for span in soup.select(".attrgroup span")
+            for span in soup.select(".attrgroup span, .mapAndAttrs span")
         )
+        # Also check full body text for AC mentions
+        body = soup.select_one("#postingbody")
+        body_text = body.get_text().lower() if body else ""
+        full_text = attrs_text + " " + body_text
 
         listing.has_ac = any(
-            kw in attrs_text for kw in ["air conditioning", "central air", "a/c", "ac unit"]
-        )
-        listing.has_washer_dryer = any(
-            kw in attrs_text
-            for kw in ["in-unit laundry", "washer/dryer", "w/d in unit", "laundry in unit", "washer in unit"]
+            kw in full_text
+            for kw in ["air conditioning", "central air", "a/c", "ac unit", "air-conditioning"]
         )
 
         if not listing.sqft:
-            m = re.search(r"(\d{3,4})\s*ft", attrs_text)
+            m = re.search(r"(\d{3,4})\s*(?:sq\s*ft|ft²|sqft)", full_text)
             if m:
                 listing.sqft = int(m.group(1))
 
-        desc_el = soup.select_one("#postingbody")
-        if desc_el:
-            listing.description = desc_el.get_text(strip=True)[:800]
+        if body:
+            listing.description = body.get_text(strip=True)[:800]
 
         if not listing.image_url:
-            img = soup.select_one("#thumbs img") or soup.select_one(".iw img")
+            img = soup.select_one("#thumbs img, .iw img")
             if img:
                 listing.image_url = img.get("src")
