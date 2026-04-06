@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SF Apartments</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f9fafb;
+      color: #111827;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { font-size: 18px; font-weight: 700; }
+    header h1 span { color: #4f46e5; }
+    #stats { font-size: 13px; color: #6b7280; }
+
+    /* ── Layout ── */
+    .page { display: flex; max-width: 1400px; margin: 0 auto; padding: 24px; gap: 24px; }
+
+    /* ── Filters sidebar ── */
+    .filters {
+      width: 220px;
+      flex-shrink: 0;
+    }
+    .filters h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin-bottom: 16px; }
+    .filter-group { margin-bottom: 20px; }
+    .filter-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #374151; }
+
+    .toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer; font-size: 14px; }
+    .toggle-row input { width: 16px; height: 16px; accent-color: #4f46e5; cursor: pointer; }
+
+    select, .sort-select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      background: #fff;
+      color: #111827;
+      cursor: pointer;
+    }
+    select:focus { outline: 2px solid #4f46e5; border-color: #4f46e5; }
+
+    .btn {
+      width: 100%;
+      padding: 9px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-secondary { background: #f3f4f6; color: #374151; margin-top: 8px; }
+    .btn-secondary:hover { background: #e5e7eb; }
+
+    /* ── Main area ── */
+    .main { flex: 1; min-width: 0; }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    #result-count { font-size: 14px; color: #6b7280; }
+    .toolbar select { width: auto; }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      overflow: hidden;
+      transition: box-shadow .15s, transform .1s;
+    }
+    .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.1); transform: translateY(-2px); }
+
+    .card-img {
+      width: 100%;
+      height: 170px;
+      object-fit: cover;
+      display: block;
+      background: #f3f4f6;
+    }
+    .card-img-placeholder {
+      width: 100%;
+      height: 170px;
+      background: linear-gradient(135deg, #e0e7ff, #f3f4f6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      color: #c7d2fe;
+    }
+
+    .card-body { padding: 14px; }
+    .card-price { font-size: 20px; font-weight: 700; }
+    .card-meta { font-size: 13px; color: #6b7280; margin-top: 3px; }
+    .card-location { font-size: 13px; color: #6b7280; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .badges { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ac { background: #d1fae5; color: #065f46; }
+    .badge-wd { background: #dbeafe; color: #1e40af; }
+    .badge-source { background: #f3f4f6; color: #6b7280; }
+    .badge-new { background: #fef3c7; color: #92400e; }
+
+    .card-link {
+      display: block;
+      margin-top: 12px;
+      text-align: center;
+      background: #4f46e5;
+      color: #fff;
+      padding: 8px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    .card-link:hover { background: #4338ca; }
+
+    /* ── States ── */
+    .loading, .empty {
+      text-align: center;
+      padding: 80px 20px;
+      color: #6b7280;
+    }
+    .loading-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #e5e7eb;
+      border-top-color: #4f46e5;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .pagination {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 24px;
+    }
+    .pagination button {
+      padding: 7px 14px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .pagination button:hover { background: #f3f4f6; }
+    .pagination button.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .pagination button:disabled { opacity: .4; cursor: default; }
+
+    #scrape-btn {
+      padding: 6px 14px;
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    #scrape-btn:hover { background: #e5e7eb; }
+    #scrape-btn.loading { opacity: .6; pointer-events: none; }
+
+    .source-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-pill {
+      padding: 4px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      background: #fff;
+      transition: all .12s;
+    }
+    .source-pill.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>SF <span>Apartments</span></h1>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <span id="stats">Loading...</span>
+    <button id="scrape-btn">Refresh listings</button>
+  </div>
+</header>
+
+<div class="page">
+  <!-- Filters -->
+  <aside class="filters">
+    <h2>Filters</h2>
+
+    <div class="filter-group">
+      <label>Bedrooms</label>
+      <label class="toggle-row"><input type="radio" name="beds" value="" checked /> All</label>
+      <label class="toggle-row"><input type="radio" name="beds" value="studio" /> Studio</label>
+      <label class="toggle-row"><input type="radio" name="beds" value="1br" /> 1 Bedroom</label>
+    </div>
+
+    <div class="filter-group">
+      <label>Amenities</label>
+      <label class="toggle-row">
+        <input type="checkbox" id="filter-ac" />
+        Air conditioning (AC)
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" id="filter-wd" />
+        In-unit washer/dryer
+      </label>
+    </div>
+
+    <div class="filter-group">
+      <label>Max Price</label>
+      <select id="filter-price">
+        <option value="">Up to $3,500</option>
+        <option value="2000">Up to $2,000</option>
+        <option value="2500">Up to $2,500</option>
+        <option value="3000">Up to $3,000</option>
+        <option value="3500">Up to $3,500</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label>Source</label>
+      <div class="source-pills">
+        <div class="source-pill active" data-source="">All</div>
+        <div class="source-pill" data-source="craigslist">Craigslist</div>
+        <div class="source-pill" data-source="apartments.com">Apts.com</div>
+        <div class="source-pill" data-source="zillow">Zillow</div>
+        <div class="source-pill" data-source="padmapper">Padmapper</div>
+      </div>
+    </div>
+
+    <button class="btn btn-secondary" id="reset-btn">Reset filters</button>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="toolbar">
+      <span id="result-count"></span>
+      <select class="sort-select" id="sort-select">
+        <option value="newest">Newest first</option>
+        <option value="price_asc">Price: low to high</option>
+        <option value="price_desc">Price: high to low</option>
+      </select>
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <div class="pagination" id="pagination"></div>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
