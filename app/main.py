@@ -171,8 +171,10 @@ When mentioning a specific listing always include its price, neighborhood, and U
                 base_url="https://openrouter.ai/api/v1",
                 api_key=api_key,
             )
+            model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
+            logger.info(f"Chat: using model {model}")
             stream = client.chat.completions.create(
-                model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-opus-4"),
+                model=model,
                 max_tokens=1024,
                 messages=[{"role": "system", "content": system_prompt}, *messages_payload],
                 stream=True,
@@ -183,6 +185,7 @@ When mentioning a specific listing always include its price, neighborhood, and U
                     yield f"data: {json.dumps({'text': text})}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
+            logger.error(f"Chat error: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             yield "data: [DONE]\n\n"
 
